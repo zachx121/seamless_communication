@@ -65,6 +65,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    print(f">>> args:\n{args}\n")
+
     if not args.tgt_lang or args.output_path is None:
         raise Exception(
             "--tgt_lang, --output_path must be provided for SeamlessExpressive inference."
@@ -155,6 +157,14 @@ def main() -> None:
         duration_factor=args.duration_factor,
         prosody_encoder_input=src_gcmvn,
     )
+    print(f">>> src_gcmvn is {src_gcmvn}")
+    print(f">>> text_output len is {len(str(text_output[0]))}")
+    print(f">>> unit_output len is {len(unit_output.units[0])}")
+    import pickle
+    with open("./units.pkl", "wb") as fwb:
+        pickle.dump(unit_output.units, fwb)
+    with open("./src_gcmvn.pkl", "wb") as fwb:
+        pickle.dump(src_gcmvn, fwb)
 
     assert unit_output is not None
     speech_output = pretssel_generator.predict(
@@ -162,6 +172,10 @@ def main() -> None:
         tgt_lang=args.tgt_lang,
         prosody_encoder_input=src_gcmvn,
     )
+    wav_arr = speech_output.audio_wavs[0][0].to(torch.float32).cpu().numpy()
+    with open("./wav_arr.pkl", "wb") as fwb:
+        pickle.dump(wav_arr, fwb)
+
 
     logger.info(f"Saving expressive translated audio in {args.tgt_lang}")
     torchaudio.save(
