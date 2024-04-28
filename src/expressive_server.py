@@ -34,7 +34,7 @@ logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
 device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 class args:
-    duration_factor=0.8
+    duration_factor=1.0  # speed nar 语速
     gated_model_dir=Path('/root/autodl-fs/SeamlessExpressive')
     model_name='seamless_expressivity'
     no_repeat_ngram_size=4
@@ -43,7 +43,7 @@ class args:
     text_generation_beam_size=5
     text_generation_max_len_a=1
     text_generation_max_len_b=200
-    texteneration_ngram_blocking=False
+    text_generation_ngram_blocking=False
     text_unk_blocking=False
     tgt_lang='eng'
     unit_generation_beam_size=5
@@ -146,20 +146,27 @@ if __name__ == '__main__':
     def test_json():
         if request.method != "POST":
             return None
-        print(request.headers)
+
         data = request.get_data()
         info = json.loads(data)
+        # print(info)
         audio_buffer = base64.b64decode(info['buffer'])
         sr = 16000
         dtype = np.int16  # np.float32 or np.int16
         audio_arr = np.frombuffer(audio_buffer, dtype=dtype)
-        wav_arr, wav_sr, text = M.predict(audio_arr, sr)
+        # M.predict要求是双通道float32的音频，而输入是单通道int16
+        if len(audio_arr.shape) == 1:
+            audio_arr = np.vstack([audio_arr, audio_arr])
+        audio_arr = audio_arr.astype(np.float32) / 32768.0  # 归一化到 [-1.0, 1.0]
+        audio_arr = torch.from_numpy(audio_arr)
+        wav_arr, wav_sr, text_cstr = M.predict(audio_arr, sr)
         rsp = {"trace_id": "",
-               "audio_arr": base64.b64encode(wav_arr.tobytes()).decode(),
+               "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),
                "sample_rate": wav_sr,
-               "audio_text": text,
+               "audio_text": str(text_cstr),
                "status": "0",
                "msg": "success."}
+        print(rsp['audio_text'])
         rsp = json.dumps(rsp)
         return rsp
 

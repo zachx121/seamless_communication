@@ -17,11 +17,13 @@ BYTES_PER_SEC = SAMPLE_RATE * SAMPLE_WIDTH * CHANNEL
 # Function to make the POST request with audio buffer
 def send_audio(buffer):
     url = "http://192.168.0.1:6006/test_json"
+    url = "https://u212392-b041-38191a3f.bjb1.seetacloud.com:8443/test_json"
     data = {"buffer": base64.b64encode(buffer).decode()}
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
-    response = requests.post(url, data=json.dumps(data), headers=headers, timeout=0.5)
+    response = requests.post(url, data=json.dumps(data), headers=headers, timeout=5)
     rsp = json.loads(response.text)
-    scipy.io.wavfile.write(f"rsp_audio_{time.time():0.f}.wav", rsp['sample_rate'], rsp['audio_arr'])
+    rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
+    scipy.io.wavfile.write(f"rsp_audio_{int(time.time())}.wav", rsp['sample_rate'], rsp_audio_arr)
     print(rsp["audio_text"])
 
 # Callback function for audio input
@@ -46,9 +48,9 @@ def callback(in_data, frame_count, time_info, status):
         # 判断上一个seg的状态
         if IS_APPENDING:
             BUFFER_CACHE += in_data
-            print(f"Send And Save... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
+            print(f"Save And Send... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
+            scipy.io.wavfile.write(f"req_audio_{TIME_TAG}.wav", SAMPLE_RATE, np.frombuffer(BUFFER_CACHE, dtype=np.int16))
             send_audio(BUFFER_CACHE)
-            scipy.io.wavfile.write(f"audio_buffer_{TIME_TAG}.wav", SAMPLE_RATE, np.frombuffer(BUFFER_CACHE, dtype=np.int16))
             IS_APPENDING = False
             TIME_TAG = -1
         # 指向空白音
@@ -64,7 +66,7 @@ stream = audio.open(format=pyaudio.paInt16,
                     channels=CHANNEL,
                     rate=SAMPLE_RATE,
                     input=True,
-                    frames_per_buffer=int(BYTES_PER_SEC*0.1),  # 控制在0.25s执行一次call_back
+                    frames_per_buffer=int(BYTES_PER_SEC*0.25),  # 控制在0.25s执行一次call_back
                     stream_callback=callback)
 
 print("Recording...")
