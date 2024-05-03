@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torchaudio
 from pathlib import Path
@@ -26,13 +28,13 @@ dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 # # in_file="/root/autodl-fs/audio_samples/现场台词.mp3"
 # # in_file="/root/autodl-fs/audio_samples/小Lin说.m4a"
 # wav, sample_rate = torchaudio.load(in_file)
-# print("原音频信息", wav.shape, wav.dtype, sample_rate)
+# print("原音频信息", wav.shape, wav.dtype, sample_rate) # 原音频信息 torch.Size([2, 340928]) torch.float32 44100
 # # display(Audio(in_file, rate=16000, autoplay=False, normalize=True))
 # wav = torchaudio.functional.resample(wav, orig_freq=sample_rate, new_freq=16_000)
 # # wav[1] = wav[0]  # Debug 尝试做成单通道模拟双通道的模式？
-# print("重采样音频信息", wav.shape, wav.dtype)
+# print("重采样音频信息", wav.shape, wav.dtype) # 重采样音频信息 torch.Size([2, 123693]) torch.float32
 # wav = wav.transpose(0, 1)
-# print("最终输入音频信息", wav.shape, wav.dtype)
+# print("最终输入音频信息", wav.shape, wav.dtype) # 最终输入音频信息 torch.Size([123693, 2]) torch.float32
 
 
 def remove_prosody_tokens_from_text(text: str) -> str:
@@ -116,7 +118,7 @@ def process(wav):
         is_ragged=False,
     )
 
-    print(f">>> src_gcmvn is {src_gcmvn}")
+    logging.debug(f">>> src_gcmvn is {src_gcmvn}")
 
     # src_gcmvn['seqs'] = src_gcmvn['seqs']*0.7
 
@@ -132,12 +134,12 @@ def process(wav):
         prosody_encoder_input=src_gcmvn,
     )
 
-    print(f">>> src_gcmvn is {src_gcmvn}")
-    print(f">>> text_output len is {len(str(text_output[0]))}")
-    print(f">>> unit_output len is {len(unit_output.units[0])}")
-    print(f">>> text with prosody:\n{text_output}")
+    logging.debug(f">>> src_gcmvn is {src_gcmvn}")
+    logging.debug(f">>> text_output len is {len(str(text_output[0]))}")
+    logging.debug(f">>> unit_output len is {len(unit_output.units[0])}")
+    logging.debug(f">>> text with prosody:\n{text_output}")
     text = remove_prosody_tokens_from_text(str(text_output[0]))
-    print(f">>> text w/o prosody:\n{text}")
+    logging.debug(f">>> text w/o prosody:\n{text}")
 
 
     speech_output = pretssel_generator.predict(
@@ -147,7 +149,7 @@ def process(wav):
     )
 
     wav_arr = speech_output.audio_wavs[0][0].to(torch.float32).cpu().numpy()
-    print(wav_arr.shape,wav_arr.dtype,speech_output.sample_rate)
+    logging.debug(wav_arr.shape,wav_arr.dtype,speech_output.sample_rate)
     return wav_arr, speech_output.sample_rate, text
     # audio_play = Audio(wav_arr, rate=speech_output.sample_rate, autoplay=False, normalize=True)
     # display(audio_play)
