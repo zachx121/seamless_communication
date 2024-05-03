@@ -21,18 +21,18 @@ from seamless_communication.store import add_gated_assets
 device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-in_file = "/root/autodl-fs/audio_samples/小杨哥带货.m4a"
-# in_file="/root/autodl-fs/audio_samples/董宇辉带货.m4a"
-# in_file="/root/autodl-fs/audio_samples/现场台词.mp3"
-# in_file="/root/autodl-fs/audio_samples/小Lin说.m4a"
-wav, sample_rate = torchaudio.load(in_file)
-print("原音频信息", wav.shape, wav.dtype, sample_rate)
-# display(Audio(in_file, rate=16000, autoplay=False, normalize=True))
-wav = torchaudio.functional.resample(wav, orig_freq=sample_rate, new_freq=16_000)
-# wav[1] = wav[0]  # Debug 尝试做成单通道模拟双通道的模式？
-print("重采样音频信息", wav.shape, wav.dtype)
-wav = wav.transpose(0, 1)
-print("最终输入音频信息", wav.shape, wav.dtype)
+# in_file = "/root/autodl-fs/audio_samples/小杨哥带货.m4a"
+# # in_file="/root/autodl-fs/audio_samples/董宇辉带货.m4a"
+# # in_file="/root/autodl-fs/audio_samples/现场台词.mp3"
+# # in_file="/root/autodl-fs/audio_samples/小Lin说.m4a"
+# wav, sample_rate = torchaudio.load(in_file)
+# print("原音频信息", wav.shape, wav.dtype, sample_rate)
+# # display(Audio(in_file, rate=16000, autoplay=False, normalize=True))
+# wav = torchaudio.functional.resample(wav, orig_freq=sample_rate, new_freq=16_000)
+# # wav[1] = wav[0]  # Debug 尝试做成单通道模拟双通道的模式？
+# print("重采样音频信息", wav.shape, wav.dtype)
+# wav = wav.transpose(0, 1)
+# print("最终输入音频信息", wav.shape, wav.dtype)
 
 
 def remove_prosody_tokens_from_text(text: str) -> str:
