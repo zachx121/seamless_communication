@@ -86,9 +86,12 @@ class ExpressiveModel:
         self.gcmvn_std = torch.tensor(_gcmvn_std, device=device, dtype=dtype)
 
     def predict(self, wav, sample_rate):
+        logging.debug("原音频信息, %s, %s, %s" % (wav.shape, wav.dtype, sample_rate))
         # wav, sample_rate = torchaudio.load(args.input)  # INPUT
         wav = torchaudio.functional.resample(wav, orig_freq=sample_rate, new_freq=16_000)
+        logging.debug("重采样音频信息, %s, %s" % (wav.shape, wav.dtype))
         wav = wav.transpose(0, 1)
+        logging.debug("最终输入音频信息, %s, %s" % (wav.shape, wav.dtype))
 
         data = self.fbank_extractor(
             {
