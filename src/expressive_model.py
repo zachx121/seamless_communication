@@ -22,7 +22,7 @@ device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
 
-class args:
+class DefualtArgs:
     tgt_lang = 'eng'
     duration_factor=0.8
     gated_model_dir=Path('/root/autodl-fs/SeamlessExpressive')
@@ -44,20 +44,21 @@ class args:
 
 
 class ExpressiveModel:
-    def __init__(self, sample_rate=16000):
+    def __init__(self, inp_args=DefualtArgs, sample_rate=16000):
+        self.args=inp_args
         self.sample_rate = sample_rate
-        add_gated_assets(args.gated_model_dir)
-        unit_tokenizer = load_unity_unit_tokenizer(args.model_name)
+        add_gated_assets(self.args.gated_model_dir)
+        unit_tokenizer = load_unity_unit_tokenizer(self.args.model_name)
         # 通用Translator框架 (文本->文本、音频->文本、文本->音频 etc.)
         self.translator = Translator(
-                args.model_name,
+                self.args.model_name,
                 vocoder_name_or_card=None,
                 device=device,
                 dtype=dtype,
             )
 
         self.pretssel_generator = PretsselGenerator(
-                args.vocoder_name,
+                self.args.vocoder_name,
                 vocab_info=unit_tokenizer.vocab_info,
                 device=device,
                 dtype=dtype,
@@ -72,11 +73,11 @@ class ExpressiveModel:
                 device=device,
                 dtype=dtype,
             )
-        _gcmvn_mean, _gcmvn_std = load_gcmvn_stats(args.vocoder_name)
+        _gcmvn_mean, _gcmvn_std = load_gcmvn_stats(self.args.vocoder_name)
         self.gcmvn_mean = torch.tensor(_gcmvn_mean, device=device, dtype=dtype)
         self.gcmvn_std = torch.tensor(_gcmvn_std, device=device, dtype=dtype)
 
-        self.text_generation_opts, self.unit_generation_opts = set_generation_opts(args)
+        self.text_generation_opts, self.unit_generation_opts = set_generation_opts(self.args)
 
     @staticmethod
     def remove_prosody_tokens_from_text(text: str) -> str:
@@ -86,8 +87,8 @@ class ExpressiveModel:
         return text
 
     def predict(self, wav, duration_factor=None, tgt_lang=None):
-        duration_factor = args.duration_factor if duration_factor is None else duration_factor
-        tgt_lang = args.tgt_lang if tgt_lang is None else tgt_lang
+        duration_factor = self.args.duration_factor if duration_factor is None else duration_factor
+        tgt_lang = self.args.tgt_lang if tgt_lang is None else tgt_lang
         data = self.fbank_extractor(
             {
                 "waveform": wav,
@@ -116,7 +117,7 @@ class ExpressiveModel:
             tgt_lang=tgt_lang,
             text_generation_opts=self.text_generation_opts,
             unit_generation_opts=self.unit_generation_opts,
-            unit_generation_ngram_filtering=args.unit_generation_ngram_filtering,
+            unit_generation_ngram_filtering=self.args.unit_generation_ngram_filtering,
             duration_factor=duration_factor,
             prosody_encoder_input=src_gcmvn,  # 通过配置src_gcmvn应该可以实现指定音色，这是个字典，有一个key存到tensor
         )
