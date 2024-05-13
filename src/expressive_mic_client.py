@@ -1,3 +1,7 @@
+import logging
+logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                    level=logging.INFO)
 import sys
 
 import pyaudio
@@ -17,14 +21,23 @@ BYTES_PER_SEC = SAMPLE_RATE * SAMPLE_WIDTH * CHANNEL
 # Function to make the POST request with audio buffer
 def send_audio(buffer):
     url = "http://192.168.0.1:6006/test_json"
-    url = "https://u212392-b041-38191a3f.bjb1.seetacloud.com:8443/test_json"
-    data = {"buffer": base64.b64encode(buffer).decode()}
+    url = "https://u212392-8904-1248e7f4.bjb1.seetacloud.com:8443/" + "test_json"
+    data = {"buffer": base64.b64encode(buffer).decode(),
+            "sample_rate": SAMPLE_RATE,
+            "duration_factor": 1.2,
+            "tgt_lang": "eng"}
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
     response = requests.post(url, data=json.dumps(data), headers=headers, timeout=5)
-    rsp = json.loads(response.text)
-    rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
-    scipy.io.wavfile.write(f"rsp_audio_{int(time.time())}.wav", rsp['sample_rate'], rsp_audio_arr)
-    print(rsp["audio_text"])
+    if response.status_code != 200:
+        logging.error(f"Request Error with code: {response.status_code}")
+        with open("tmp.text", "w") as fw:
+            fw.writelines(json.dumps(data))
+        logging.error(f"send data saved in 'tmp.text'")
+    else:
+        rsp = json.loads(response.text)
+        rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
+        scipy.io.wavfile.write(f"rsp_audio_{int(time.time())}.wav", rsp['sample_rate'], rsp_audio_arr)
+        logging.info(rsp["audio_text"])
 
 # Callback function for audio input
 TIME_TAG = -1
@@ -74,7 +87,7 @@ def callback_v2(in_data, frame_count, time_info, status):
     rms = audioop.rms(in_data, 2)
     if rms >= RMS_HOLD and not START_APPEND:
         TIME_TAG = int(time.time())
-        print(f"Start Append (rms: {rms}>={RMS_HOLD} time: {TIME_TAG}).")
+        logging.debug(f"Start Append (rms: {rms}>={RMS_HOLD} time: {TIME_TAG}).")
         START_APPEND = True
 
     if START_APPEND:
@@ -82,9 +95,9 @@ def callback_v2(in_data, frame_count, time_info, status):
         # 检查buffer末尾，倒查是否有持续达0.2s的停顿，音频输入采样是0.05s一个segment所以应该不会出现AB两句话中间检测不到
         cond_pause = check_pause(BUFFER_CACHE, pause_sec=PAUSE_SEC, rms_hold=RMS_HOLD, bytes_sec=BYTES_PER_SEC)
         if cond_pause:
-            print(f"Save And Send... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
+            logging.debug(f"Save And Send... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
             scipy.io.wavfile.write(f"req_audio_{TIME_TAG}.wav", SAMPLE_RATE, np.frombuffer(BUFFER_CACHE, dtype=np.int16))
-            # send_audio(BUFFER_CACHE)
+            send_audio(BUFFER_CACHE)
             # 重置
             BUFFER_CACHE = b""
             START_APPEND = False

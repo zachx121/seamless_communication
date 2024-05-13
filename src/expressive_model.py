@@ -23,8 +23,9 @@ dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
 
 class DefualtArgs:
+    # 'arb,ben,cat,ces,cmn,cym,dan,deu,eng,est,fin,fra,hin,ind,ita,jpn,kan,kor,mlt,nld,pes,pol,por,ron,rus,slk,spa,swe,swh,tam,tel,tgl,tha,tur,ukr,urd,uzn,vie'
     tgt_lang = 'eng'
-    duration_factor=0.8
+    duration_factor=1.0  # 这是时长控制，即x0.8是变快速、x1.2是变慢速
     gated_model_dir=Path('/root/autodl-fs/SeamlessExpressive')
     model_name='seamless_expressivity'
     no_repeat_ngram_size=4
@@ -135,11 +136,14 @@ class ExpressiveModel:
     def predict_file(self, in_file, duration_factor=None, tgt_lang=None):
         import torchaudio
         wav, sample_rate = torchaudio.load(in_file)
+        # 原音频信息 torch.Size([2, 334420]) torch.float32 44100
         logging.debug("原音频信息", wav.shape, wav.dtype, sample_rate)
         wav = torchaudio.functional.resample(wav, orig_freq=sample_rate, new_freq=16_000)
         # wav[1] = wav[0]  # Debug 尝试做成单通道模拟双通道的模式？
+        # 重采样音频信息 torch.Size([2, 121332]) torch.float32
         logging.debug("重采样音频信息", wav.shape, wav.dtype)
         wav = wav.transpose(0, 1)
+        # 最终输入音频信息 torch.Size([121332, 2]) torch.float32
         logging.debug("最终输入音频信息", wav.shape, wav.dtype)
         return self.predict(wav, duration_factor=duration_factor, tgt_lang=tgt_lang)
 
