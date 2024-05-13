@@ -36,8 +36,9 @@ def send_audio(buffer):
     else:
         rsp = json.loads(response.text)
         rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
-        scipy.io.wavfile.write(f"rsp_audio_{int(time.time())}.wav", rsp['sample_rate'], rsp_audio_arr)
-        logging.info(rsp["audio_text"])
+        fp = f"rsp_audio_{int(time.time())}.wav"
+        scipy.io.wavfile.write(fp, rsp['sample_rate'], rsp_audio_arr)
+        logging.info(f"同传完毕，音频写入文件'{fp}'，文本为: '{rsp['audio_text']}'")
 
 # Callback function for audio input
 TIME_TAG = -1
