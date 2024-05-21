@@ -1,9 +1,11 @@
+# ffmpeg -i a.mp4 -ar 16000 a.wav
 import logging
 logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S",
                     level=logging.INFO)
+import sounddevice  # to direct play audio_arr
 import sys
-
+import wave
 import pyaudio
 import requests
 import json
@@ -18,14 +20,21 @@ CHANNEL=1
 SAMPLE_RATE=16000
 SAMPLE_WIDTH = 2  # 标准的16位PCM音频中，每个样本占用2个字节
 BYTES_PER_SEC = SAMPLE_RATE * SAMPLE_WIDTH * CHANNEL
-# Function to make the POST request with audio buffer
-def send_audio(buffer):
+TIME_TAG = -1
+BUFFER_CACHE = b""
+# 停顿检测的时长、音量; 控制在0.05s执行一次call_back 注意采样频率快了rms_hold得降低
+# 有些视频有背景音乐，现在还没有组合人声提取功能需要提高音量阈值(todo. 人声提取模块)
+SAMPLE_SEC, PAUSE_SEC, RMS_HOLD = 0.05, 1.0, 700
+START_APPEND = False
+
+
+def send_audio(buffer, direct_play=False):
     url = "http://192.168.0.1:6006/test_json"
     url = "https://u212392-8904-1248e7f4.bjb1.seetacloud.com:8443/" + "test_json"
     data = {"buffer": base64.b64encode(buffer).decode(),
             "sample_rate": SAMPLE_RATE,
-            "duration_factor": 1.2,
-            "tgt_lang": "eng"}
+            "duration_factor": 1.0,
+            "tgt_lang": "eng"}  # cmn/eng/deu/fra/ita/spa
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
     response = requests.post(url, data=json.dumps(data), headers=headers, timeout=5)
     if response.status_code != 200:
@@ -36,40 +45,13 @@ def send_audio(buffer):
     else:
         rsp = json.loads(response.text)
         rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
+        if direct_play:
+            logging.info(f"同传完毕，直接播放，文本为: '{rsp['audio_text']}'")
+            sounddevice.play(rsp_audio_arr, samplerate=rsp['sample_rate'])
         fp = f"rsp_audio_{int(time.time())}.wav"
         scipy.io.wavfile.write(fp, rsp['sample_rate'], rsp_audio_arr)
         logging.info(f"同传完毕，音频写入文件'{fp}'，文本为: '{rsp['audio_text']}'")
 
-# Callback function for audio input
-TIME_TAG = -1
-BUFFER_CACHE = b""
-SAMPLE_SEC, PAUSE_SEC, RMS_HOLD = 0.05, 0.5, 500  # 停顿检测的时长、音量; 控制在0.05s执行一次call_back 注意采样频率快了rms_hold得降低
-IS_APPENDING = False
-def callback(in_data, frame_count, time_info, status):
-    global TIME_TAG, BUFFER_CACHE, RMS_HOLD, IS_APPENDING
-    rms = audioop.rms(in_data, 2)
-    if rms >= RMS_HOLD:
-        IS_APPENDING = True
-        # 音量超过阈值时直接追加buffer和确定开始时间戳
-        TIME_TAG = TIME_TAG if TIME_TAG != -1 else int(time.time())
-        print(f"\rappending at {time.time():.0f}, rms: {rms}")
-        BUFFER_CACHE += in_data
-        # todo. 过长怎么办，例如追加后检查buffer时长超过五秒？
-        #       - 找到离末尾最近的一个最小音量（低于15分位数？）时间点？
-    else:
-        # 音量不够大时会持续更新buffer指向最新的"空白音in_data"
-        # 如果上一个segment还是在追加，那就把当前的in_data追加进去发请求，然后再更新buffer
-        # 判断上一个seg的状态
-        if IS_APPENDING:
-            BUFFER_CACHE += in_data
-            print(f"Save And Send... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
-            scipy.io.wavfile.write(f"req_audio_{TIME_TAG}.wav", SAMPLE_RATE, np.frombuffer(BUFFER_CACHE, dtype=np.int16))
-            send_audio(BUFFER_CACHE)
-            IS_APPENDING = False
-            TIME_TAG = -1
-        # 指向空白音
-        BUFFER_CACHE = in_data
-    return None, pyaudio.paContinue
 
 # 检查buffer末尾，倒查是否有持续达0.2s的停顿，音频输入采样是0.05s一个segment所以应该不会出现AB两句话中间检测不到
 def check_pause(audio_buffer, pause_sec, rms_hold, bytes_sec):
@@ -82,7 +64,7 @@ def check_pause(audio_buffer, pause_sec, rms_hold, bytes_sec):
     # 长度够了但是最后0.1s
     return False
 
-START_APPEND = False
+
 def callback_v2(in_data, frame_count, time_info, status):
     global TIME_TAG, START_APPEND, BUFFER_CACHE, RMS_HOLD
     rms = audioop.rms(in_data, 2)
@@ -90,6 +72,11 @@ def callback_v2(in_data, frame_count, time_info, status):
         TIME_TAG = int(time.time())
         logging.debug(f"Start Append (rms: {rms}>={RMS_HOLD} time: {TIME_TAG}).")
         START_APPEND = True
+    else:
+        if rms < RMS_HOLD:
+            logging.debug(f"Low Volume (rms: {rms}<{RMS_HOLD} time: {TIME_TAG})")
+        else:
+            logging.debug(f"Keep appending...")
 
     if START_APPEND:
         BUFFER_CACHE += in_data
@@ -98,7 +85,7 @@ def callback_v2(in_data, frame_count, time_info, status):
         if cond_pause:
             logging.debug(f"Save And Send... TIME_TAG:{TIME_TAG} buffer_len({len(BUFFER_CACHE)}):{len(BUFFER_CACHE)/BYTES_PER_SEC:.2f}s")
             scipy.io.wavfile.write(f"req_audio_{TIME_TAG}.wav", SAMPLE_RATE, np.frombuffer(BUFFER_CACHE, dtype=np.int16))
-            send_audio(BUFFER_CACHE)
+            send_audio(BUFFER_CACHE, direct_play=True)
             # 重置
             BUFFER_CACHE = b""
             START_APPEND = False
@@ -106,38 +93,73 @@ def callback_v2(in_data, frame_count, time_info, status):
         BUFFER_CACHE = in_data
     return None, pyaudio.paContinue
 
-# Initialize PyAudio
-audio = pyaudio.PyAudio()
-# todo. 这里通过控制frames_per_buffer实现0.25s执行一次callback，潜在的问题是如果语速太快，AB两句话中间间隔时间不足0.25s可能算出来rms音量就没有停顿了
-# 更合理的做法还是callback里持续追加一个buffer，然后对那个buffer做空白时长判断吧？
-stream = audio.open(format=pyaudio.paInt16,
-                    channels=CHANNEL,
-                    rate=SAMPLE_RATE,
-                    input=True,
-                    frames_per_buffer=int(BYTES_PER_SEC*SAMPLE_SEC),  # 控制在0.05s执行一次call_back 注意采样频率快了rms_hold得降低
-                    stream_callback=callback_v2)
 
-print("Recording...")
+def audio_from_mic():
+    # Initialize PyAudio
+    audio = pyaudio.PyAudio()
+    # todo. 这里通过控制frames_per_buffer实现0.25s执行一次callback，潜在的问题是如果语速太快，AB两句话中间间隔时间不足0.25s可能算出来rms音量就没有停顿了
+    # 更合理的做法还是callback里持续追加一个buffer，然后对那个buffer做空白时长判断吧？
+    stream = audio.open(format=pyaudio.paInt16,
+                        channels=CHANNEL,
+                        rate=SAMPLE_RATE,
+                        input=True,
+                        frames_per_buffer=int(BYTES_PER_SEC*SAMPLE_SEC),  # 控制在0.05s执行一次call_back 注意采样频率快了rms_hold得降低
+                        stream_callback=callback_v2)
+    print("Recording...")
+    # Start the stream
+    stream.start_stream()
+    # Keep the script running
+    try:
+        while stream.is_active():
+            pass
+    except KeyboardInterrupt:
+        print("Stopping...")
+    except Exception as e:
+        print(e)
+        # Stop stream
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+        sys.exit(1)
+    finally:
+        # Stop stream
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
 
-# Start the stream
-stream.start_stream()
 
-# Keep the script running
-try:
+# 还没测通
+def audio_from_file(fp):
+    wf = wave.open(fp, 'rb')
+    def _callback(in_data, frame_count, time_info, status):
+        # logging.debug(f"[callback] {in_data} {frame_count} {time_info} {status}")
+        data = wf.readframes(frame_count)
+        callback_v2(data, frame_count, time_info, status)
+        # 需要伪造一个数据return出去，不然检测到长度小于frame_count这个stream就自动中断了
+        silent_data = np.zeros(frame_count * wf.getnchannels(), dtype=np.int16).tobytes()
+        # logging.debug(f"[callback] read data size: {len(data)} silent data size: {len(silent_data)}")
+        return silent_data, pyaudio.paContinue
+
+    # Create an instance of PyAudio
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=audio.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=SAMPLE_RATE,
+                        output=True,
+                        frames_per_buffer=int(BYTES_PER_SEC * SAMPLE_SEC),
+                        stream_callback=_callback)
+    print("Playing audio from file...")
+    stream.start_stream()
     while stream.is_active():
-        pass
-except KeyboardInterrupt:
-    print("Stopping...")
-except Exception as e:
-    print(e)
-    # Stop stream
+        time.sleep(0.1)
+    # Stop and close the stream
     stream.stop_stream()
     stream.close()
+    # Close PyAudio
     audio.terminate()
-    sys.exit(1)
-finally:
-    # Stop stream
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
+    print("Playback finished.")
 
+
+if __name__ == '__main__':
+    # audio_from_file("/Users/zhou/Downloads/a1544131919-1-16.wav")
+    audio_from_mic()
