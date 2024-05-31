@@ -36,8 +36,10 @@ if __name__ == '__main__':
         wav_arr, wav_sr, text_cstr = M.predict(audio_arr,
                                                duration_factor=info.get('duration_factor', None),
                                                tgt_lang=info.get('tgt_lang', None))
+        wav_arr_int16 = (np.clip(wav_arr, -1.0, 1.0) * 32767).astype(np.int16)
         rsp = {"trace_id": "",
                "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),
+               "audio_buffer_int16": base64.b64encode(wav_arr_int16.tobytes()).decode(),
                "sample_rate": wav_sr,
                "audio_text": str(text_cstr),
                "status": "0",
