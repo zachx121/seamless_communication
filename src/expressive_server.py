@@ -34,7 +34,7 @@ class Param:
     def tgt_lang(self):
         # eng/cmn/eng/deu/fra/ita/spa
         language_map = {"zh_cn": "cmn", "en_us": "eng", "fr_fr": "fra", "es_es": "spa"}
-        assert self.lang in language_map, f"非法语言参数，只接受 {'/'.join(language_map.keys())}"
+        assert self.lang in language_map, f"语言参数错误: lang='{self.lang}'，只接受 {'/'.join(language_map.keys())}"
         return language_map[self.lang]
 
     def __init__(self, info_dict):

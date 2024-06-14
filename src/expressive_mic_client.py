@@ -30,12 +30,12 @@ START_APPEND = False
 
 def send_audio(buffer, direct_play=False):
     url = "http://192.168.0.1:6006/test_json"
-    url = "https://u212392-8904-1248e7f4.bjb1.seetacloud.com:8443/" + "test_json"
+    url = "https://u212392-9161-bdb8f242.bjb1.seetacloud.com:8443/" + "test_json"
     data = {"buffer": base64.b64encode(buffer).decode(),
             "buffer_dtype": "int16",
             "sample_rate": SAMPLE_RATE,
-            "speed": 1.2,
-            "tgt_lang": "en_us"}  # cmn/eng/deu/fra/ita/spa
+            "speed": 0.8,
+            "lang": "en_us"}  # cmn/eng/deu/fra/ita/spa
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
     response = requests.post(url, data=json.dumps(data), headers=headers, timeout=5)
     if response.status_code != 200:
