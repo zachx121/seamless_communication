@@ -2,8 +2,7 @@
 import logging
 logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S",
-                    level=logging.INFO)
-import sounddevice  # to direct play audio_arr
+                    level=logging.DEBUG)
 import sys
 import wave
 import pyaudio
@@ -14,6 +13,18 @@ import audioop
 import time
 import numpy as np
 import scipy
+
+####### 尝试用耳机录音、电脑公放 注意这个修改是全局生效，不是只对这个程序生效######
+import sounddevice as sd
+print(sd.query_devices())
+# 日志如下>标示为默认输入设备，<表示默认的输出设备
+# > 0 zt的AirPods Pro - Find My, Core Audio (1 in, 0 out)
+# < 1 zt的AirPods Pro - Find My, Core Audio (0 in, 2 out)
+#   2 MacBook Pro Microphone, Core Audio (1 in, 0 out)
+#   3 MacBook Pro Speakers, Core Audio (0 in, 2 out)
+print(sd.default.device)  # 一个列表两个元素，依次表示使用的输入和输出
+idx = [idx for idx, i in enumerate(sd.query_devices()) if 'MacBook Pro Speakers' in i['name']][0]
+sd.default.device[1] = idx  # 使用mbp的speaker
 
 # 默认都用int16的音频流
 CHANNEL=1
@@ -31,13 +42,14 @@ START_APPEND = False
 def send_audio(buffer, direct_play=False):
     url = "http://192.168.0.1:6006/test_json"
     url = "https://u212392-9161-bdb8f242.bjb1.seetacloud.com:8443/" + "test_json"
+    url = "http://region-45.autodl.pro:40332/" + "test_json"
     data = {"buffer": base64.b64encode(buffer).decode(),
             "buffer_dtype": "int16",
             "sample_rate": SAMPLE_RATE,
             "speed": 0.8,
             "lang": "en_us"}  # cmn/eng/deu/fra/ita/spa
     headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
-    response = requests.post(url, data=json.dumps(data), headers=headers, timeout=5)
+    response = requests.post(url, data=json.dumps(data), headers=headers, timeout=10)
     if response.status_code != 200:
         logging.error(f"Request Error with code: {response.status_code}")
         with open("tmp.text", "w") as fw:
@@ -48,8 +60,9 @@ def send_audio(buffer, direct_play=False):
         rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32)
         if direct_play:
             logging.info(f"同传完毕，直接播放，文本为: '{rsp['audio_text']}'")
-            sounddevice.play(rsp_audio_arr, samplerate=rsp['sample_rate'])
-        fp = f"rsp_audio_{int(time.time())}.wav"
+            sd.play(rsp_audio_arr, samplerate=rsp['sample_rate'])
+        global TIME_TAG
+        fp = f"rsp_audio_{TIME_TAG}.wav"
         scipy.io.wavfile.write(fp, rsp['sample_rate'], rsp_audio_arr)
         logging.info(f"同传完毕，音频写入文件'{fp}'，文本为: '{rsp['audio_text']}'")
 
