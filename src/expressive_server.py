@@ -1,15 +1,22 @@
-
+# 启动的时候: conda deactivate && python expressive_server.py
+# conda下有一个异常无法处理，OSError: libsndfile is not found! Since you are in a Conda environment, use `conda install -c conda-forge libsndfile==1.0.31` to install it
 import torch
 import numpy as np
 import logging
+import librosa
 import base64
 import json
+import utils_audio
 from flask import Flask, request
 logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S",
-                    level=logging.INFO)
+                    level=logging.DEBUG)
 from expressive_model import ExpressiveModel
 
+if not torch.cuda.is_available():
+    logging.error(">>>>>CUDA Not Available<<<<"+"\n"*4)
+
+app = Flask(__name__, static_folder="/home/zhoutong", static_url_path="")
 
 class Param:
     trace_id: str = ""
@@ -17,7 +24,7 @@ class Param:
     buffer_dtype: str = "int16"
     sample_rate: float = 16000
     speed: float = 1.0  # 合成音频的语速 (e.g. 1.2加速 0.8减速)
-    lang: str = None  # 合成音频的语言 (e.g. cn/en/fr/es)
+    lang: str = None  # 合成音频的语言 (e.g. zh_cn/en_us/fr_fr/es_es)
 
     @property
     def dtype(self):
@@ -48,7 +55,6 @@ class Param:
 
 
 if __name__ == '__main__':
-    app = Flask(__name__, static_folder="/home/zhoutong", static_url_path="")
     M = ExpressiveModel()
 
 
@@ -68,18 +74,23 @@ if __name__ == '__main__':
             audio_arr = np.expand_dims(audio_arr, axis=0)
         audio_arr = audio_arr.astype(np.float32) / 32768.0  # 归一化到 [-1.0, 1.0]
         audio_arr = torch.from_numpy(audio_arr.T)
+        logging.debug(f"Start Predict of tid='{p.trace_id}'")
         wav_arr, wav_sr, text_cstr = M.predict(audio_arr,
                                                duration_factor=p.duration_factor,
                                                tgt_lang=p.tgt_lang)
-        wav_arr_int16 = (np.clip(wav_arr, -1.0, 1.0) * 32767).astype(np.int16)
+        logging.debug(f"Finish Predict of tid='{p.trace_id}'")
+        logging.debug(f"Start resample&int16 of tid='{p.trace_id}'")
+        wav_16khz = librosa.resample(wav_arr, orig_sr=wav_sr, target_sr=16000)
+        wav_int16 = (np.clip(wav_16khz, -1.0, 1.0) * 32767).astype(np.int16)
+        logging.debug(f"Finish resample&int16 of tid='{p.trace_id}'")
         rsp = {"trace_id": p.trace_id,
-               "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),
-               "audio_buffer_int16": base64.b64encode(wav_arr_int16.tobytes()).decode(),
-               "sample_rate": wav_sr,
+               # "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),  # float32 & 24khz
+               "audio_buffer_int16": base64.b64encode(wav_int16.tobytes()).decode(),  # int16 & 16khz
+               "sample_rate": 16000,
                "audio_text": str(text_cstr),
                "status": "0",
                "msg": "success."}
-        print(rsp['audio_text'])
+        print(rsp['audio_text']+f"  sample_rate={rsp['sample_rate']}")
         rsp = json.dumps(rsp)
         return rsp
 
