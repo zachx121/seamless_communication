@@ -10,10 +10,11 @@ import base64
 import json
 import utils_audio
 from flask import Flask, request
-logging.basicConfig(format='[%(asctime)s-%(levelname)s-CLIENT]: %(message)s',
+logging.basicConfig(format='[%(asctime)s-%(levelname)s-%(process)s-CLIENT]: %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S",
                     level=logging.DEBUG)
 from expressive_model import ExpressiveModel
+import multiprocessing as mp
 
 if not torch.cuda.is_available():
     logging.error(">>>>>CUDA Not Available<<<<"+"\n"*4)
@@ -55,38 +56,42 @@ class Param:
         assert self.dtype == np.int16 and self.sample_rate == 16000, "暂时强制要求音频类型为16khz、int16，后端这里不做重采样"
 
 
+# POST | 如果是json
+@app.route("/test_json", methods=['POST'])
+def test_json():
+    logging.debug(f"Start connection.. start-time: {time.time()}")
+    p = Param(request.get_json())
+    logging.debug(f"Start Multi-Process Prediction of tid='{p.trace_id}' start-time: {time.time()}")
+    queue_in.put(p)
+    result = queue_out.get()
+    logging.debug(f"Finish Multi-Process Prediction of tid='{p.trace_id}' start-time: {time.time()}")
+    return result
 
-if __name__ == '__main__':
+
+def model_process(q_in, q_out):
     M = ExpressiveModel()
-
-
-    # POST | 如果是json
-    @app.route("/test_json", methods=['POST'])
-    def test_json():
-        if request.method != "POST":
-            return None
-
-        logging.debug(f"Start connection.. start-time: {time.time()}")
-        p = Param(request.get_json())
-
+    while True:
+        # data是M.predict的参数字典，例如 {"wav":np.array, "duration":..}
+        p:Param = q_in.get()
+        if p is None:
+            break
         audio_arr = np.frombuffer(base64.b64decode(p.buffer), dtype=p.dtype)
         # utils_audio.save_audio(audio_arr, 16000, f"./tmp_{p.trace_id}.wav")
-
         # M.predict要求是双通道float32的音频，而输入是单通道int16
         if len(audio_arr.shape) == 1:
             # audio_arr = np.vstack([audio_arr, audio_arr])
             audio_arr = np.expand_dims(audio_arr, axis=0)
         audio_arr = audio_arr.astype(np.float32) / 32768.0  # 归一化到 [-1.0, 1.0]
         audio_arr = torch.from_numpy(audio_arr.T)
-        logging.debug(f"Start Predict of tid='{p.trace_id}' start-time: {time.time()}")
-        wav_arr, wav_sr, text_cstr = M.predict(audio_arr,
+        logging.debug(f"    Start Predict of tid='{p.trace_id}'")
+        wav_arr, wav_sr, text_cstr = M.predict(wav=audio_arr,
                                                duration_factor=p.duration_factor,
                                                tgt_lang=p.tgt_lang)
-        logging.debug(f"Finish Predict of tid='{p.trace_id}'")
-        logging.debug(f"Start resample&int16 of tid='{p.trace_id}'")
+        logging.debug(f"    Finish Predict of tid='{p.trace_id}'")
+        logging.debug(f"    Start resample&int16 of tid='{p.trace_id}'")
         wav_16khz = librosa.resample(wav_arr, orig_sr=wav_sr, target_sr=16000)
         wav_int16 = (np.clip(wav_16khz, -1.0, 1.0) * 32767).astype(np.int16)
-        logging.debug(f"Finish resample&int16 of tid='{p.trace_id}' end-time: {time.time()}")
+        logging.debug(f"    Finish resample&int16 of tid='{p.trace_id}' end-time: {time.time()}")
         rsp = {"trace_id": p.trace_id,
                # "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),  # float32 & 24khz
                "audio_buffer_int16": base64.b64encode(wav_int16.tobytes()).decode(),  # int16 & 16khz
@@ -94,11 +99,28 @@ if __name__ == '__main__':
                "audio_text": str(text_cstr),
                "status": "0",
                "msg": "success."}
-        print(rsp['audio_text']+f"  sample_rate={rsp['sample_rate']}")
+        logging.info(f"    audio_text of tid='{p.trace_id}': '{rsp['audio_text']}' (sr={rsp['sample_rate']})")
         rsp = json.dumps(rsp)
-        return rsp
+        q_out.put(rsp)
 
+
+if __name__ == '__main__':
+    PROCESS_NUM = 4  # 3090 24GB
+    mp.set_start_method("spawn")
+    queue_in = mp.Queue()
+    queue_out = mp.Queue()
+    process_list = []
+    for _ in range(PROCESS_NUM):
+        p = mp.Process(target=model_process, args=(queue_in, queue_out))
+        process_list.append(p)
+        p.start()
 
     app.run(host="0.0.0.0", port=6006)
 
-
+    # 给队列发送结束信号
+    for _ in range(4):
+        queue_in.put(None)
+        queue_out.put(None)
+    # 等待子进程完成并退出
+    for p in process_list:
+        p.join()
