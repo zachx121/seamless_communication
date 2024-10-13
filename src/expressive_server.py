@@ -1,5 +1,7 @@
 # 启动的时候: conda deactivate && python expressive_server.py
 # conda下有一个异常无法处理，OSError: libsndfile is not found! Since you are in a Conda environment, use `conda install -c conda-forge libsndfile==1.0.31` to install it
+import time
+
 import torch
 import numpy as np
 import logging
@@ -64,9 +66,11 @@ if __name__ == '__main__':
         if request.method != "POST":
             return None
 
+        logging.debug(f"Start connection.. start-time: {time.time()}")
         p = Param(request.get_json())
 
         audio_arr = np.frombuffer(base64.b64decode(p.buffer), dtype=p.dtype)
+        # utils_audio.save_audio(audio_arr, 16000, f"./tmp_{p.trace_id}.wav")
 
         # M.predict要求是双通道float32的音频，而输入是单通道int16
         if len(audio_arr.shape) == 1:
@@ -74,7 +78,7 @@ if __name__ == '__main__':
             audio_arr = np.expand_dims(audio_arr, axis=0)
         audio_arr = audio_arr.astype(np.float32) / 32768.0  # 归一化到 [-1.0, 1.0]
         audio_arr = torch.from_numpy(audio_arr.T)
-        logging.debug(f"Start Predict of tid='{p.trace_id}'")
+        logging.debug(f"Start Predict of tid='{p.trace_id}' start-time: {time.time()}")
         wav_arr, wav_sr, text_cstr = M.predict(audio_arr,
                                                duration_factor=p.duration_factor,
                                                tgt_lang=p.tgt_lang)
@@ -82,7 +86,7 @@ if __name__ == '__main__':
         logging.debug(f"Start resample&int16 of tid='{p.trace_id}'")
         wav_16khz = librosa.resample(wav_arr, orig_sr=wav_sr, target_sr=16000)
         wav_int16 = (np.clip(wav_16khz, -1.0, 1.0) * 32767).astype(np.int16)
-        logging.debug(f"Finish resample&int16 of tid='{p.trace_id}'")
+        logging.debug(f"Finish resample&int16 of tid='{p.trace_id}' end-time: {time.time()}")
         rsp = {"trace_id": p.trace_id,
                # "audio_buffer": base64.b64encode(wav_arr.tobytes()).decode(),  # float32 & 24khz
                "audio_buffer_int16": base64.b64encode(wav_int16.tobytes()).decode(),  # int16 & 16khz
