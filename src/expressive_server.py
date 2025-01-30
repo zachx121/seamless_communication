@@ -20,8 +20,10 @@ import pika
 import pyloudnorm as pyln
 import librosa
 
-
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 app = Flask(__name__, static_folder="/home/zhoutong", static_url_path="")
+
 
 class Param:
     trace_id: str = ""
@@ -29,9 +31,8 @@ class Param:
     buffer_dtype: str = "int16"
     sample_rate: float = 16000
     speed: float = 1.0  # 合成音频的语速 (e.g. 1.2加速 0.8减速)
-    asr_language: str = 'zh_cn' #识别语言
     lang: str = None  # 合成音频的语言 (e.g. zh_cn/en_us/fr_fr/es_es)
-    result_queue_name: str = None #请求结果返回的queue
+    result_queue_name: str = None  # 请求结果返回的queue
     @property
     def dtype(self):
         dtype_map = {"int16": np.int16, "float32": np.float32}
@@ -49,12 +50,6 @@ class Param:
         language_map = {"zh_cn": "cmn", "en_us": "eng", "fr_fr": "fra", "es_es": "spa"}
         assert self.lang in language_map, f"语言参数错误: lang='{self.lang}'，只接受 {'/'.join(language_map.keys())}"
         return language_map[self.lang]
-    @property
-    def src_lang(self):
-        # eng/cmn/eng/deu/fra/ita/spa
-        language_map = {"zh_cn": "cmn", "en_us": "eng", "fr_fr": "fra", "es_es": "spa"}
-        assert self.asr_language in language_map, f"语言参数错误: asr_language='{self.asr_language}'，只接受 {'/'.join(language_map.keys())}"
-        return language_map[self.asr_language]
 
     def __init__(self, info_dict):
         for key in self.__annotations__.keys():
@@ -63,6 +58,7 @@ class Param:
 
         # 暂时强制要求音频类型为16khz、int16，后端这里不做重采样
         assert self.dtype == np.int16 and self.sample_rate == 16000, "暂时强制要求音频类型为16khz、int16，后端这里不做重采样"
+
 
 queue_service_seamless_request='queue_service_seamless_request'
 # # POST | 如果是json
@@ -75,6 +71,7 @@ queue_service_seamless_request='queue_service_seamless_request'
 #     result = queue_out.get()
 #     logging.debug(f"Finish Multi-Process Prediction of tid='{p.trace_id}' start-time: {time.time()}")
 #     return result
+
 
 def connect_to_rabbitmq():
     # RabbitMQ 连接信息
@@ -105,6 +102,7 @@ def connect_to_rabbitmq():
         return connection, channel
     except Exception as e:
         logger.error(f"Failed to connect to RabbitMQ: {repr(e)}")
+
 
 def adjust_loudness(audio_arr, target_lufs=-23.0):
     """
@@ -164,10 +162,9 @@ def model_process():
             
             audio_arr = torch.from_numpy(audio_arr.T)
             logger.debug(f"    Start Predict of tid='{p.trace_id}'")
-            wav_arr, wav_sr, text_cstr,asr_text = M.predict(wav=audio_arr,
+            wav_arr, wav_sr, text_cstr = M.predict(wav=audio_arr,
                                                    duration_factor=p.duration_factor,
-                                                   tgt_lang=p.tgt_lang,
-                                                  src_lang=p.src_lang)
+                                                   tgt_lang=p.tgt_lang)
        
             logger.debug(f"    Finish Predict of tid='{p.trace_id}'")
             logger.debug(f"    Start resample&int16 of tid='{p.trace_id}'")
@@ -193,7 +190,6 @@ def model_process():
                     "audio_buffer_int16": base64.b64encode(wav_int16.tobytes()).decode(),   # base64 编码后的音频数据
                     "sample_rate": 16000,  # 采样率
                     "audio_text": str(text_cstr),  # 音频转换成的文本
-                    "asr_text":str(asr_text) # 音频识别后文本
                 }
             }
             # 修正if语句
@@ -205,7 +201,7 @@ def model_process():
 
             logger.info(f"success audio of tid='{p.trace_id}' audio_test='{rsp['result']['audio_text']}'  asr_text='{rsp['result']['asr_text']}' result_queue_name='{p.result_queue_name}' ")
 
-            send_result_with_retry(channel,p.result_queue_name, rsp)
+            send_result_with_retry(channel, p.result_queue_name, rsp)
         
         except pika.exceptions.AMQPConnectionError:
             logger.error("Connection to RabbitMQ lost, attempting to reconnect...")
@@ -214,9 +210,10 @@ def model_process():
             logger.error(f"Error in task: {e}", exc_info=True)
             result = {"code": 1, "msg": "Model Training failed.", "result": task.get('speaker', 'unknown')}
             # 发送结果到队列
-            send_result_with_retry(channel, result)
+            send_result_with_retry(channel, p.result_queue_name, result)
 
-def send_result_with_retry(channel, queue,result):
+
+def send_result_with_retry(channel, queue, result):
     for attempt in range(5):
         try:
             channel.basic_publish(
@@ -242,37 +239,24 @@ if __name__ == '__main__':
         else:
             instance_id = "default"  # 如果未传入参数，使用默认值
 
-        # 日志目录（代码中自动创建，无需脚本管理）
-        log_dir = "./logs"
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            print(f"Created log directory: {log_dir}")
-        else:
-            print(f"Log directory already exists: {log_dir}")
-
-        # 根据实例编号生成日志文件名
-        log_file = f"consumer-{instance_id}.log"
-        log_path = os.path.join(log_dir, log_file)
-
         # 配置日志
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-
+        handler_dir = "./logs"
+        os.makedirs(handler_dir, exist_ok=True)
         file_handler = TimedRotatingFileHandler(
-        filename=log_path,  # 日志文件路径
-        when="midnight",    # 按天分隔（午夜生成新日志文件）
-        interval=1,         # 每 1 天分隔一次
-        backupCount=7,      # 最多保留最近 7 天的日志文件
-        encoding="utf-8"    # 设置编码，避免中文日志乱码
+            filename=os.path.join(handler_dir, f"consumer-{instance_id}.log"),  # 根据实例编号生成日志文件名
+            when="midnight",  # 按天分隔（午夜生成新日志文件）
+            interval=1,  # 每 1 天分隔一次
+            backupCount=7,  # 最多保留最近 7 天的日志文件
+            encoding="utf-8"  # 设置编码，避免中文日志乱码
         )
         file_handler.suffix = "%Y-%m-%d"  # 设置日志文件后缀格式，例如 server.log.2025-01-09
         file_handler.setFormatter(logging.Formatter(
             fmt='[%(asctime)s-%(levelname)s]: %(message)s',
             datefmt="%Y-%m-%d %H:%M:%S"
         ))
-
         # 将文件处理器添加到日志记录器中
         logger.addHandler(file_handler)
+
         model_process()
     except KeyboardInterrupt:
         logger.info("Consumer stopped.")

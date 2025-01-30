@@ -23,7 +23,7 @@ print(sd.query_devices())
 #   2 MacBook Pro Microphone, Core Audio (1 in, 0 out)
 #   3 MacBook Pro Speakers, Core Audio (0 in, 2 out)
 print(sd.default.device)  # 一个列表两个元素，依次表示使用的输入和输出
-idx = [idx for idx, i in enumerate(sd.query_devices()) if 'MacBook Pro Speakers' in i['name']][0]
+idx = [idx for idx, i in enumerate(sd.query_devices()) if 'MacBook Pro Speakers' in i['name'] or 'MacBook Pro扬声器'][0]
 sd.default.device[1] = idx  # 使用mbp的speaker
 
 # 默认都用int16的音频流
@@ -35,7 +35,7 @@ TIME_TAG = -1
 BUFFER_CACHE = b""
 # 停顿检测的时长、音量; 控制在0.05s执行一次call_back 注意采样频率快了rms_hold得降低
 # 有些视频有背景音乐，现在还没有组合人声提取功能需要提高音量阈值(todo. 人声提取模块)
-SAMPLE_SEC, PAUSE_SEC, RMS_HOLD = 0.05, 1.0, 700
+SAMPLE_SEC, PAUSE_SEC, RMS_HOLD = 0.05, 1.0, 1500
 START_APPEND = False
 
 
@@ -43,6 +43,8 @@ def send_audio(buffer, direct_play=False):
     url = "http://192.168.0.1:6006/test_json"
     url = "https://u212392-9161-bdb8f242.bjb1.seetacloud.com:8443/" + "test_json"
     url = "http://region-45.autodl.pro:40332/" + "test_json"
+    url = "https://u212392-9108-daf01965.beijinga.seetacloud.com/" + "test_json"
+    url = "https://u212392-a93c-f809d961.beijinga.seetacloud.com/" + "test_json"
     data = {"buffer": base64.b64encode(buffer).decode(),
             "buffer_dtype": "int16",
             "sample_rate": SAMPLE_RATE,
@@ -58,12 +60,16 @@ def send_audio(buffer, direct_play=False):
     else:
         rsp = json.loads(response.text)
         rsp_audio_arr = np.frombuffer(base64.b64decode(rsp['audio_buffer_int16']), dtype=np.int16)
-        if direct_play:
-            logging.info(f"同传完毕，直接播放，文本为: '{rsp['audio_text']}'")
-            sd.play(rsp_audio_arr, samplerate=rsp['sample_rate'])
+        logging.info(f"rsp.keys: {rsp.keys()} rsp_audio_arr.shape: {rsp_audio_arr.shape}")
         global TIME_TAG
         fp = f"rsp_audio_{TIME_TAG}.wav"
         scipy.io.wavfile.write(fp, rsp['sample_rate'], rsp_audio_arr)
+        if direct_play:
+            try:
+                logging.info(f"同传完毕，直接播放，文本为: '{rsp['audio_text']}'")
+                sd.play(rsp_audio_arr, samplerate=rsp['sample_rate'])
+            except Exception as e:
+                logging.info(f"ERROR: {str(e)}")
         # scipy.io.wavfile.write(f"rsp_{TIME_TAG}_24khz.wav", 24000, np.frombuffer(base64.b64decode(rsp['audio_buffer']), dtype=np.float32))
         # scipy.io.wavfile.write(f"rsp_{TIME_TAG}_16khz.wav", 16000, np.frombuffer(base64.b64decode(rsp['audio_buffer_int16']), dtype=np.int16))
         logging.info(f"同传完毕，音频写入文件'{fp}'，文本为: '{rsp['audio_text']}'")

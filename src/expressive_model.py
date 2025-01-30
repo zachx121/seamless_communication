@@ -87,7 +87,7 @@ class ExpressiveModel:
         text = " ".join(text.split())
         return text
 
-    def predict(self, wav, duration_factor=None, tgt_lang=None,src_lang=None):
+    def predict(self, wav, duration_factor=None, tgt_lang=None):
         duration_factor = self.args.duration_factor if duration_factor is None else duration_factor
         tgt_lang = self.args.tgt_lang if tgt_lang is None else tgt_lang
         data = self.fbank_extractor(
@@ -111,28 +111,7 @@ class ExpressiveModel:
             seq_lens=torch.LongTensor([gcmvn_fbank.shape[0]]),
             is_ragged=False,
         )
-        # 如果传了src_lang，进行一次asr
-        asr_text=None
-        if src_lang:
-            asr_texts = self.translator.asr_predict(
-                input=src,            # 输入数据，通常是音频数据（如Tensor或音频文件路径）
-                tgt_lang=src_lang,    # 目标语言，通常是源语言，或者是为特定 ASR 任务需要的语言
-                sample_rate=16000     # 音频采样率，常见的如16000
-            )
-            if asr_texts :
-                asr_text = self.remove_prosody_tokens_from_text(str(asr_texts[0]))
 
-        text_output, unit_output = self.translator.predict(
-            input=src,
-            task_str="s2st",
-            tgt_lang=tgt_lang,
-            text_generation_opts=self.text_generation_opts,
-            unit_generation_opts=self.unit_generation_opts,
-            unit_generation_ngram_filtering=self.args.unit_generation_ngram_filtering,
-            duration_factor=duration_factor,
-            prosody_encoder_input=src_gcmvn,  # 通过配置src_gcmvn应该可以实现指定音色，这是个字典，有一个key存到tensor
-        )
-        
         text_output, unit_output = self.translator.predict(
             input=src,
             task_str="s2st",
@@ -152,10 +131,7 @@ class ExpressiveModel:
         wav_arr = speech_output.audio_wavs[0][0].to(torch.float32).cpu().numpy()
         wav_sr = speech_output.sample_rate
         text = self.remove_prosody_tokens_from_text(str(text_output[0]))
-        if asr_text :
-            return wav_arr, wav_sr, text,asr_text
-        else :
-            return wav_arr, wav_sr, text
+        return wav_arr, wav_sr, text
 
     def predict_file(self, in_file, duration_factor=None, tgt_lang=None):
         import torchaudio
