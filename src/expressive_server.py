@@ -199,7 +199,7 @@ def model_process():
 
                
 
-            logger.info(f"success audio of tid='{p.trace_id}' audio_test='{rsp['result']['audio_text']}'  asr_text='{rsp['result']['asr_text']}' result_queue_name='{p.result_queue_name}' ")
+            logger.info(f"success audio of tid='{p.trace_id}' audio_test='{rsp['result']['audio_text']}' result_queue_name='{p.result_queue_name}' ")
 
             send_result_with_retry(channel, p.result_queue_name, rsp)
         
